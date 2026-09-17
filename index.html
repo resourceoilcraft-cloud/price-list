@@ -15,9 +15,7 @@
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:Oswald,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;position:relative}
-/* Листики фоном по всей странице — фиксированный слой позади всего контента (z-index:-1),
-   плиткой на весь экран. Все карточки/списки непрозрачны поверх него, поэтому текст они
-   никогда не перекрывают — видны только в промежутках между блоками. */
+
 body::before{
   content:"";
   position:fixed;
@@ -68,8 +66,7 @@ main{max-width:1080px;margin:0 auto;padding:1.25rem 1rem 2rem}
   .brand-logo{width:96px;height:96px}
 }
 @media (min-width:621px){
-  /* На десктопе вся страница помещается в экран целиком, без прокрутки — скроллится только
-     содержимое внутри активной вкладки (прайс-лист или список), а не страница целиком. */
+  
   html,body{height:100%}
   body{display:flex;flex-direction:column;height:100vh;overflow:hidden}
   .brand-header,.tabs{flex:0 0 auto}
@@ -95,7 +92,12 @@ main{max-width:1080px;margin:0 auto;padding:1.25rem 1rem 2rem}
 .order-row label{font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
 .order-row select,.order-row input{padding:.55rem .65rem;border:1.5px solid var(--border);border-radius:8px;font-size:.86rem;background:var(--surface);color:var(--text);width:100%}
 .order-row select:focus,.order-row input:focus{outline:none;border-color:var(--accent)}
-.order-row.readonly .ro-value{padding:.55rem 0;font-size:.9rem;font-weight:600;color:var(--text)}
+.cart-head{display:none;grid-template-columns:minmax(0,1fr) auto auto auto auto;gap:1rem;padding:0 0 .6rem;margin-bottom:.4rem;border-bottom:1px solid var(--border);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}
+.cart-head.visible{display:grid}
+.cart-head span:not(:first-child){text-align:right;min-width:3.2rem}
+.order-row.readonly{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;align-items:center;gap:1rem;padding:.85rem 0}
+.order-row.readonly .ro-name{font-size:1.05rem;font-weight:600}
+.order-row.readonly .ro-value{font-size:1rem;font-weight:600;color:var(--text);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;min-width:3.2rem}
 .order-row .price-sum span{display:block;padding:.55rem 0;font-weight:700;font-size:.9rem;text-align:right}
 .order-row .remove{flex:0 0 auto;background:var(--surface-2);border:none;border-radius:8px;width:38px;height:38px;font-size:1.1rem;cursor:pointer;color:var(--text-muted)}
 .order-row .remove:hover{color:#a1463d}
@@ -110,6 +112,16 @@ main{max-width:1080px;margin:0 auto;padding:1.25rem 1rem 2rem}
 .cart-footer button.ghost{background:transparent;border:1.5px solid var(--border);border-radius:999px;padding:.7rem 1.1rem;font-size:.85rem;color:var(--text-muted);cursor:pointer}
 .empty{text-align:center;color:var(--text-faint);padding:2.5rem 1rem}
 footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72rem;padding:1rem}
+@media print{
+  body::before{display:none}
+  html,body{height:auto!important;overflow:visible!important;display:block!important}
+  main{overflow:visible!important}
+  .tabs,.search,.category-pills,#tab-price,.add-row,.cart-footer .actions,footer,.toast{display:none!important}
+  #tab-cart{display:block!important;flex:none!important}
+  #tab-cart .card{flex:none!important;box-shadow:none;border:none;padding:0}
+  .cart-rows-scroll{flex:none!important;max-height:none!important;overflow:visible!important}
+  .brand-logo{width:64px!important;height:64px!important}
+}
 </style>
 </head>
 <body>
@@ -139,6 +151,7 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
 
   <div id="tab-cart" class="tab-content">
     <div class="card">
+      <div id="cart-head" class="cart-head"><span>Товар</span><span>Фасовка</span><span>Кол-во</span><span>Цена</span><span>Сумма</span></div>
       <div id="cart-rows" class="cart-rows-scroll"></div>
       <button type="button" class="add-row" id="add-row-btn">+ Добавить ещё товар</button>
       <div class="cart-footer">
@@ -149,7 +162,7 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
         <div class="actions">
           <button type="button" class="ghost" id="clear-btn">Очистить</button>
           <button type="button" class="ghost" id="share-btn" hidden disabled>Поделиться</button>
-          <button type="button" class="primary" id="export-btn" disabled>Скачать список</button>
+          <button type="button" class="primary" id="export-btn" disabled title="Откроется окно печати — выберите «Сохранить как PDF»">Скачать PDF</button>
         </div>
       </div>
     </div>
@@ -164,19 +177,13 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
 <script>
 (function () {
   var CATALOG = JSON.parse(document.getElementById('catalog-data').textContent);
-  // При "Поделиться" мы кладём сюда текущий собранный список (см. shareCart) и пересобираем
-  // всю страницу заново — получатель открывает её и сразу видит готовый список, а не пустой.
   var CART_PRESET = JSON.parse(document.getElementById('cart-preset').textContent || 'null');
   var rows = (CART_PRESET && CART_PRESET.length > 0) ? CART_PRESET : [{ group: null, variant: null, qty: 1 }];
-  // Файл открыт с уже готовым списком — значит это копия, отправленная клиенту, а не рабочий
-  // инструмент владельца: прайс-лист и все кнопки редактирования тут ни к чему.
   var READONLY = !!(CART_PRESET && CART_PRESET.length > 0);
   var activeCategory = null;
   var OTHER_CATEGORY = '__other__';
-
   function formatMoney(v) { return v.toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ₽'; }
   function formatAmount(v) { return (Math.round(v * 10000) / 10000).toString(); }
-
   function findVariant(groupIdx, variantId) {
     if (groupIdx === null || groupIdx === undefined || variantId === null || variantId === undefined) return null;
     var g = CATALOG[groupIdx];
@@ -186,14 +193,11 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
     }
     return null;
   }
-
-  // ---- Пиллы категорий над прайс-листом: строятся из различных g.category, найденных в CATALOG ----
   function getCategories() {
     var set = {};
     CATALOG.forEach(function (g) { if (g.category) set[g.category] = true; });
     return Object.keys(set).sort();
   }
-
   function makeCategoryPill(label, value) {
     var btn = document.createElement('button');
     btn.type = 'button';
@@ -206,18 +210,15 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
     });
     return btn;
   }
-
   function renderCategoryPills() {
     var categories = getCategories();
     var hasUncategorized = CATALOG.some(function (g) { return !g.category; });
     var wrap = document.getElementById('category-pills');
     wrap.innerHTML = '';
-
     if (categories.length === 0) {
       wrap.style.display = 'none';
       return;
     }
-
     wrap.style.display = '';
     wrap.appendChild(makeCategoryPill('Все', null));
     categories.forEach(function (c) { wrap.appendChild(makeCategoryPill(c, c)); });
@@ -225,14 +226,11 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
       wrap.appendChild(makeCategoryPill('Остальное', OTHER_CATEGORY));
     }
   }
-
-  // ---- Вкладка "Прайс-лист": карточка на товар, клик по цене — сразу добавляет в список ----
   function renderPriceList() {
     var query = document.getElementById('price-search').value.trim().toLowerCase();
     var wrap = document.getElementById('price-list');
     wrap.innerHTML = '';
     var any = false;
-
     CATALOG.forEach(function (g, gi) {
       if (query && g.baseName.toLowerCase().indexOf(query) === -1) return;
       if (activeCategory === OTHER_CATEGORY) {
@@ -241,10 +239,8 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
         return;
       }
       any = true;
-
       var row = document.createElement('div');
       row.className = 'price-group';
-
       var info = document.createElement('div');
       var h3 = document.createElement('h3');
       h3.textContent = g.baseName;
@@ -253,39 +249,31 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
       meta.textContent = g.variants.length + (g.variants.length === 1 ? ' фасовка' : ' фасовки');
       info.appendChild(h3);
       info.appendChild(meta);
-
       var variants = document.createElement('div');
       variants.className = 'price-variants';
-
       g.variants.forEach(function (v) {
         var line = document.createElement('div');
         line.className = 'price-line';
-
         var amount = document.createElement('span');
         amount.className = 'amount';
         amount.textContent = formatAmount(v.amount) + ' ' + g.unit;
-
         var dots = document.createElement('span');
         dots.className = 'dots';
-
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'price-btn';
         btn.textContent = formatMoney(v.price);
         btn.title = 'Добавить в список';
         btn.addEventListener('click', function () { addToCartFromPrice(gi, v.id, g.baseName, btn); });
-
         line.appendChild(amount);
         line.appendChild(dots);
         line.appendChild(btn);
         variants.appendChild(line);
       });
-
       row.appendChild(info);
       row.appendChild(variants);
       wrap.appendChild(row);
     });
-
     if (!any) {
       var empty = document.createElement('div');
       empty.className = 'price-search-empty';
@@ -293,10 +281,6 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
       wrap.appendChild(empty);
     }
   }
-
-  // Клик по цене в прайс-листе: если такая фасовка уже в списке — увеличиваем количество,
-  // иначе занимаем первую пустую строку или добавляем новую. Плюс — короткая обратная связь
-  // (вспышка кнопки + всплывающее сообщение), чтобы было видно, что клик сработал.
   function addToCartFromPrice(groupIdx, variantId, groupName, btnEl) {
     var existing = rows.find(function (r) { return r.group === groupIdx && r.variant === variantId; });
     if (existing) {
@@ -311,16 +295,13 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
         rows.push({ group: groupIdx, variant: variantId, qty: 1 });
       }
     }
-
     renderCart();
     showToast('Добавлено: ' + groupName);
-
     if (btnEl) {
       btnEl.classList.add('added');
       setTimeout(function () { btnEl.classList.remove('added'); }, 450);
     }
   }
-
   var toastTimer = null;
   function showToast(message) {
     var toast = document.getElementById('toast');
@@ -329,21 +310,17 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 1600);
   }
-
-  // ---- Вкладка "Собрать список" (конструктор строк: товар → фасовка → кол-во → цена) ----
   function addRow() {
     rows.push({ group: null, variant: null, qty: 1 });
     renderCart();
     var scrollArea = document.getElementById('cart-rows');
     scrollArea.scrollTop = scrollArea.scrollHeight;
   }
-
   function removeRow(index) {
     rows.splice(index, 1);
     if (rows.length === 0) { rows.push({ group: null, variant: null, qty: 1 }); }
     renderCart();
   }
-
   function setGroup(index, groupValue) {
     var groupIdx = groupValue === '' ? null : parseInt(groupValue, 10);
     rows[index].group = groupIdx;
@@ -351,29 +328,22 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
     rows[index].variant = variants.length > 0 ? variants[0].id : null;
     renderCart();
   }
-
   function setVariant(index, variantValue) {
     rows[index].variant = variantValue === '' ? null : parseInt(variantValue, 10);
     renderCart();
   }
-
   function setQty(index, qtyValue) {
     rows[index].qty = Math.max(1, parseInt(qtyValue, 10) || 1);
     renderCart();
   }
-
   function buildRowElement(row, index) {
     var variant = findVariant(row.group, row.variant);
     var lineTotal = variant ? variant.price * row.qty : 0;
-
     if (READONLY) {
       return buildReadonlyRowElement(row, variant, lineTotal);
     }
-
     var el = document.createElement('div');
     el.className = 'order-row';
-
-    // Товар
     var colProduct = document.createElement('div'); colProduct.className = 'col grow';
     var labelP = document.createElement('label'); labelP.textContent = 'Товар';
     var selProduct = document.createElement('select');
@@ -388,8 +358,6 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
     });
     selProduct.addEventListener('change', function () { setGroup(index, selProduct.value); });
     colProduct.appendChild(labelP); colProduct.appendChild(selProduct);
-
-    // Фасовка
     var colVariant = document.createElement('div'); colVariant.className = 'col';
     var labelV = document.createElement('label'); labelV.textContent = 'Фасовка';
     var selVariant = document.createElement('select');
@@ -407,33 +375,24 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
     }
     selVariant.addEventListener('change', function () { setVariant(index, selVariant.value); });
     colVariant.appendChild(labelV); colVariant.appendChild(selVariant);
-
-    // Кол-во
     var colQty = document.createElement('div'); colQty.className = 'col';
     var labelQ = document.createElement('label'); labelQ.textContent = 'Кол-во';
     var inputQty = document.createElement('input');
     inputQty.type = 'number'; inputQty.min = '1'; inputQty.value = row.qty;
     inputQty.addEventListener('change', function () { setQty(index, inputQty.value); });
     colQty.appendChild(labelQ); colQty.appendChild(inputQty);
-
-    // Цена
     var colPrice = document.createElement('div'); colPrice.className = 'col price-sum';
     var labelPr = document.createElement('label'); labelPr.textContent = 'Цена';
     var spanPrice = document.createElement('span'); spanPrice.textContent = variant ? formatMoney(variant.price) : '—';
     colPrice.appendChild(labelPr); colPrice.appendChild(spanPrice);
-
-    // Сумма
     var colSum = document.createElement('div'); colSum.className = 'col price-sum';
     var labelS = document.createElement('label'); labelS.textContent = 'Сумма';
     var spanSum = document.createElement('span'); spanSum.textContent = formatMoney(lineTotal);
     colSum.appendChild(labelS); colSum.appendChild(spanSum);
-
-    // Удалить строку
     var btnRemove = document.createElement('button');
     btnRemove.type = 'button'; btnRemove.className = 'remove'; btnRemove.innerHTML = '&times;';
     btnRemove.title = 'Удалить строку';
     btnRemove.addEventListener('click', function () { removeRow(index); });
-
     el.appendChild(colProduct);
     el.appendChild(colVariant);
     el.appendChild(colQty);
@@ -442,56 +401,38 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
     el.appendChild(btnRemove);
     return el;
   }
-
-  // Тот же ряд, но без выпадающих списков/полей и кнопки удаления — используется, когда страница
-  // открыта с уже готовым списком (пришла через "Поделиться"): получателю нечего редактировать.
   function buildReadonlyRowElement(row, variant, lineTotal) {
     var g = row.group !== null ? CATALOG[row.group] : null;
-
     var el = document.createElement('div');
     el.className = 'order-row readonly';
-
-    var colProduct = document.createElement('div'); colProduct.className = 'col grow';
-    var labelP = document.createElement('label'); labelP.textContent = 'Товар';
-    var valP = document.createElement('div'); valP.className = 'ro-value'; valP.textContent = g ? g.baseName : '—';
-    colProduct.appendChild(labelP); colProduct.appendChild(valP);
-
-    var colVariant = document.createElement('div'); colVariant.className = 'col';
-    var labelV = document.createElement('label'); labelV.textContent = 'Фасовка';
-    var valV = document.createElement('div'); valV.className = 'ro-value';
-    valV.textContent = variant ? (formatAmount(variant.amount) + ' ' + g.unit) : '—';
-    colVariant.appendChild(labelV); colVariant.appendChild(valV);
-
-    var colQty = document.createElement('div'); colQty.className = 'col';
-    var labelQ = document.createElement('label'); labelQ.textContent = 'Кол-во';
-    var valQ = document.createElement('div'); valQ.className = 'ro-value'; valQ.textContent = String(row.qty);
-    colQty.appendChild(labelQ); colQty.appendChild(valQ);
-
-    var colPrice = document.createElement('div'); colPrice.className = 'col price-sum';
-    var labelPr = document.createElement('label'); labelPr.textContent = 'Цена';
-    var spanPrice = document.createElement('span'); spanPrice.textContent = variant ? formatMoney(variant.price) : '—';
-    colPrice.appendChild(labelPr); colPrice.appendChild(spanPrice);
-
-    var colSum = document.createElement('div'); colSum.className = 'col price-sum';
-    var labelS = document.createElement('label'); labelS.textContent = 'Сумма';
-    var spanSum = document.createElement('span'); spanSum.textContent = formatMoney(lineTotal);
-    colSum.appendChild(labelS); colSum.appendChild(spanSum);
-
-    el.appendChild(colProduct);
-    el.appendChild(colVariant);
-    el.appendChild(colQty);
-    el.appendChild(colPrice);
-    el.appendChild(colSum);
+    var name = document.createElement('div');
+    name.className = 'ro-name';
+    name.textContent = g ? g.baseName : '—';
+    var amount = document.createElement('div');
+    amount.className = 'ro-value';
+    amount.textContent = variant ? (formatAmount(variant.amount) + ' ' + g.unit) : '—';
+    var qty = document.createElement('div');
+    qty.className = 'ro-value';
+    qty.textContent = String(row.qty);
+    var price = document.createElement('div');
+    price.className = 'ro-value';
+    price.textContent = variant ? formatMoney(variant.price) : '—';
+    var sum = document.createElement('div');
+    sum.className = 'ro-value';
+    sum.textContent = formatMoney(lineTotal);
+    el.appendChild(name);
+    el.appendChild(amount);
+    el.appendChild(qty);
+    el.appendChild(price);
+    el.appendChild(sum);
     return el;
   }
-
   function renderCart() {
     var wrap = document.getElementById('cart-rows');
     wrap.innerHTML = '';
     rows.forEach(function (row, index) { wrap.appendChild(buildRowElement(row, index)); });
     updateTotals();
   }
-
   function updateTotals() {
     var count = 0, sum = 0;
     rows.forEach(function (row) {
@@ -500,20 +441,14 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
       count += row.qty;
       sum += variant.price * row.qty;
     });
-
     document.getElementById('cart-total').textContent = formatMoney(sum);
     document.getElementById('cart-count').textContent = count > 0 ? ('В списке: ' + count + ' шт.') : 'Список пуст';
     document.getElementById('export-btn').disabled = count === 0;
     document.getElementById('share-btn').disabled = count === 0;
-
     var badge = document.getElementById('cart-tab-badge');
     badge.textContent = count;
     badge.hidden = count === 0;
   }
-
-  // И "Скачать список", и "Поделиться" отдают ОДНО И ТО ЖЕ — целую самодостаточную HTML-страницу
-  // с уже заполненным списком (см. cart-preset выше), а не плоский CSV: получатель открывает файл
-  // и сразу видит готовый список в режиме только для чтения, а не таблицу с числами.
   function buildShareableHtml() {
     var preset = rows.filter(function (r) { return r.group !== null && r.variant !== null; });
     var presetEl = document.getElementById('cart-preset');
@@ -523,35 +458,37 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
     presetEl.textContent = previousPreset;
     return html;
   }
-
   function downloadCart() {
-    var html = buildShareableHtml();
-    var blob = new Blob([html], { type: 'text/html;charset=utf-8;' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'moy-spisok.html';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    window.print();
   }
-
-  // Веб-API "Поделиться" — открывает системное меню (Telegram, WhatsApp, почта и т.п.), как в мобильных
-  // приложениях.
+  window.addEventListener('beforeprint', function () {
+    var wrap = document.getElementById('cart-rows');
+    wrap.innerHTML = '';
+    rows.forEach(function (row) {
+      var variant = findVariant(row.group, row.variant);
+      var lineTotal = variant ? variant.price * row.qty : 0;
+      wrap.appendChild(buildReadonlyRowElement(row, variant, lineTotal));
+    });
+    var head = document.getElementById('cart-head');
+    if (head) { head.classList.add('visible'); }
+  });
+  window.addEventListener('afterprint', function () {
+    if (!READONLY) {
+      renderCart();
+      var head = document.getElementById('cart-head');
+      if (head) { head.classList.remove('visible'); }
+    }
+  });
   async function shareCart() {
     var html = buildShareableHtml();
     var shareData = { title: 'Мой список покупок', text: 'Мой список покупок — откройте вложенный файл.' };
-
     try {
       var file = new File([html], 'moy-spisok.html', { type: 'text/html' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         shareData.files = [file];
       }
     } catch (e) {
-      // File API недоступен/бросил — делимся без вложения, только текстом.
     }
-
     try {
       await navigator.share(shareData);
     } catch (err) {
@@ -560,30 +497,20 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
       }
     }
   }
-
-  // Прячет вкладки и все кнопки редактирования — страница, присланная клиенту, должна быть
-  // просто готовым списком для чтения, а не рабочим инструментом сборки заказа.
   function applyReadonlyMode() {
-    // .tabs и .actions заданы через display:flex в CSS — атрибут hidden их не перекроет
-    // (у автора стиля выше приоритет, чем у правила [hidden] из UA-таблицы), поэтому здесь
-    // нужен именно инлайн-стиль.
     var tabs = document.querySelector('.tabs');
     if (tabs) { tabs.style.display = 'none'; }
-
     var addRowBtn = document.getElementById('add-row-btn');
     if (addRowBtn) { addRowBtn.hidden = true; }
-
+    var cartHead = document.getElementById('cart-head');
+    if (cartHead) { cartHead.classList.add('visible'); }
     var actions = document.querySelector('.cart-footer .actions');
     if (actions) { actions.style.display = 'none'; }
-
     var subtitle = document.getElementById('header-subtitle');
     if (subtitle) { subtitle.textContent = 'Ваш список — ничего менять не нужно.'; }
-
     var footer = document.getElementById('page-footer');
     if (footer) { footer.textContent = 'Если нужно что-то изменить — просто напишите нам.'; }
   }
-
-  // ---- Переключение вкладок ----
   document.querySelectorAll('.tab').forEach(function (btn) {
     btn.addEventListener('click', function () {
       document.querySelectorAll('.tab').forEach(function (b) { b.classList.remove('active'); });
@@ -592,7 +519,6 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
       document.getElementById('tab-' + btn.getAttribute('data-tab')).classList.add('active');
     });
   });
-
   document.getElementById('price-search').addEventListener('input', renderPriceList);
   document.getElementById('add-row-btn').addEventListener('click', addRow);
   document.getElementById('export-btn').addEventListener('click', downloadCart);
@@ -600,15 +526,11 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
     rows = [{ group: null, variant: null, qty: 1 }];
     renderCart();
   });
-
   if (navigator.share) {
     var shareBtn = document.getElementById('share-btn');
     shareBtn.hidden = false;
     shareBtn.addEventListener('click', shareCart);
   }
-
-  // Файл открыт с уже готовым списком (пришёл через "Поделиться") — сразу показываем вкладку
-  // "Собрать список" и переводим всю страницу в режим только для чтения (см. applyReadonlyMode).
   if (READONLY) {
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.remove('active'); });
     document.querySelectorAll('.tab-content').forEach(function (c) { c.classList.remove('active'); });
@@ -620,7 +542,6 @@ footer{position:relative;text-align:center;color:var(--text-faint);font-size:.72
     renderCategoryPills();
     renderPriceList();
   }
-
   renderCart();
 })();
 </script>
